@@ -28,7 +28,9 @@ EXPORTS
     CJOSE_HDR_CTY DATA
     CJOSE_HDR_ENC DATA
     CJOSE_HDR_ENC_A128CBC_HS256 DATA
+    CJOSE_HDR_ENC_A128GCM DATA
     CJOSE_HDR_ENC_A192CBC_HS384 DATA
+    CJOSE_HDR_ENC_A192GCM DATA
     CJOSE_HDR_ENC_A256CBC_HS512 DATA
     CJOSE_HDR_ENC_A256GCM DATA
     CJOSE_HDR_EPK DATA
@@ -55,7 +57,9 @@ EXPORTS
     cjose_jwe_decrypt
     cjose_jwe_decrypt_multi
     cjose_jwe_encrypt
+    cjose_jwe_encrypt_iv
     cjose_jwe_encrypt_multi
+    cjose_jwe_encrypt_multi_iv
     cjose_jwe_export
     cjose_jwe_export_json
     cjose_jwe_get_protected
