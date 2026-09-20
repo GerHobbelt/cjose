@@ -1,9 +1,9 @@
 /*!
-* Copyrights
-*
-* Portions created or assigned to Cisco Systems, Inc. are
-* Copyright (c) 2014-2016 Cisco Systems, Inc.  All Rights Reserved.
-*/
+ * Copyrights
+ *
+ * Portions created or assigned to Cisco Systems, Inc. are
+ * Copyright (c) 2014-2016 Cisco Systems, Inc.  All Rights Reserved.
+ */
 
 #include "include/util_int.h"
 
@@ -46,7 +46,7 @@ void cjose_dealloc3_default(void *p, const char *file, int line)
     cjose_get_dealloc()(p);
 }
 
-static void cjose_apply_allocs(void)
+static void _cjose_apply_allocs(void)
 {
     // set upstream
     json_set_alloc_funcs(cjose_get_alloc(), cjose_get_dealloc());
@@ -67,7 +67,7 @@ void cjose_set_alloc_funcs(cjose_alloc_fn_t alloc, cjose_realloc_fn_t realloc, c
     _realloc3 = cjose_realloc3_default;
     _dealloc3 = cjose_dealloc3_default;
 
-    cjose_apply_allocs();
+    _cjose_apply_allocs();
 }
 
 void cjose_set_alloc_ex_funcs(cjose_alloc3_fn_t alloc3, cjose_realloc3_fn_t realloc3, cjose_dealloc3_fn_t dealloc3)
@@ -80,7 +80,7 @@ void cjose_set_alloc_ex_funcs(cjose_alloc3_fn_t alloc3, cjose_realloc3_fn_t real
     _realloc = (NULL != realloc3) ? cjose_realloc_wrapped : NULL;
     _dealloc = (NULL != dealloc3) ? cjose_dealloc_wrapped : NULL;
 
-    cjose_apply_allocs();
+    _cjose_apply_allocs();
 }
 
 cjose_alloc_fn_t cjose_get_alloc(void) { return (!_alloc) ? malloc : _alloc; }
@@ -109,10 +109,7 @@ void _cjose_cleanse_dealloc(void *ptr, size_t len)
     }
 }
 
-int cjose_const_memcmp(const uint8_t *a, const uint8_t *b, const size_t size)
-{
-    return CRYPTO_memcmp(a, b, size);
-}
+int cjose_const_memcmp(const uint8_t *a, const uint8_t *b, const size_t size) { return CRYPTO_memcmp(a, b, size); }
 
 char *_cjose_strndup(const char *str, ssize_t len, cjose_err *err)
 {

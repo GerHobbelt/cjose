@@ -13,8 +13,8 @@
 
 #include <string.h>
 #include <openssl/evp.h>
-#include <openssl/crypto.h>
 #include <openssl/rsa.h>
+#include <openssl/bn.h>
 #include <openssl/err.h>
 #include <openssl/hmac.h>
 
@@ -43,6 +43,18 @@ static bool _cjose_jws_verify_sig_hmac_sha(cjose_jws_t *jws, const cjose_jwk_t *
 static bool _cjose_jws_build_sig_ec(cjose_jws_t *jws, const cjose_jwk_t *jwk, cjose_err *err);
 
 static bool _cjose_jws_verify_sig_ec(cjose_jws_t *jws, const cjose_jwk_t *jwk, cjose_err *err);
+
+static bool _cjose_jws_validate_ec_key(const char *alg, const cjose_jwk_t *jwk, cjose_err *err);
+
+#if defined(CJOSE_OPENSSL_111X)
+static bool _cjose_jws_build_dig_eddsa(cjose_jws_t *jws, const cjose_jwk_t *jwk, cjose_err *err);
+
+static bool _cjose_jws_build_sig_eddsa(cjose_jws_t *jws, const cjose_jwk_t *jwk, cjose_err *err);
+
+static bool _cjose_jws_verify_sig_eddsa(cjose_jws_t *jws, const cjose_jwk_t *jwk, cjose_err *err);
+
+static bool _cjose_jws_validate_okp_key(const char *alg, const cjose_jwk_t *jwk, cjose_err *err);
+#endif
 
 static bool _cjose_jws_validate_verify_key(cjose_jws_t *jws, const cjose_jwk_t *jwk, cjose_err *err);
 
@@ -73,10 +85,7 @@ static bool _cjose_jws_build_hdr(cjose_jws_t *jws, cjose_header_t *header, cjose
 ////////////////////////////////////////////////////////////////////////////////
 static bool _cjose_jws_validate_hdr(cjose_jws_t *jws, cjose_err *err)
 {
-    static const char *const supported_crit_headers[] = {
-        "alg",
-        "cty"
-    };
+    static const char *const supported_crit_headers[] = { "alg", "cty" };
 
     if (!_cjose_header_validate_crit((cjose_header_t *)jws->hdr, supported_crit_headers,
                                      sizeof(supported_crit_headers) / sizeof(supported_crit_headers[0]), err))
@@ -114,13 +123,21 @@ static bool _cjose_jws_validate_hdr(cjose_jws_t *jws, cjose_err *err)
         jws->fns.sign = _cjose_jws_build_sig_hmac_sha;
         jws->fns.verify = _cjose_jws_verify_sig_hmac_sha;
     }
-    else if ((strcmp(alg, CJOSE_HDR_ALG_ES256) == 0) || (strcmp(alg, CJOSE_HDR_ALG_ES384) == 0)
-             || (strcmp(alg, CJOSE_HDR_ALG_ES512) == 0))
+    else if ((strcmp(alg, CJOSE_HDR_ALG_ES256) == 0) || (strcmp(alg, CJOSE_HDR_ALG_ES256K) == 0)
+             || (strcmp(alg, CJOSE_HDR_ALG_ES384) == 0) || (strcmp(alg, CJOSE_HDR_ALG_ES512) == 0))
     {
         jws->fns.digest = _cjose_jws_build_dig_sha;
         jws->fns.sign = _cjose_jws_build_sig_ec;
         jws->fns.verify = _cjose_jws_verify_sig_ec;
     }
+#if defined(CJOSE_OPENSSL_111X)
+    else if ((strcmp(alg, CJOSE_HDR_ALG_ED25519) == 0) || (strcmp(alg, CJOSE_HDR_ALG_ED448) == 0))
+    {
+        jws->fns.digest = _cjose_jws_build_dig_eddsa;
+        jws->fns.sign = _cjose_jws_build_sig_eddsa;
+        jws->fns.verify = _cjose_jws_verify_sig_eddsa;
+    }
+#endif
     else
     {
         CJOSE_ERROR(err, CJOSE_ERR_INVALID_ARG);
@@ -170,7 +187,7 @@ static bool _cjose_jws_build_dig_sha(cjose_jws_t *jws, const cjose_jwk_t *jwk, c
     // build digest using SHA-256/384/512 digest algorithm
     const EVP_MD *digest_alg = NULL;
     if ((strcmp(alg, CJOSE_HDR_ALG_RS256) == 0) || (strcmp(alg, CJOSE_HDR_ALG_PS256) == 0)
-        || (strcmp(alg, CJOSE_HDR_ALG_ES256) == 0))
+        || (strcmp(alg, CJOSE_HDR_ALG_ES256) == 0) || (strcmp(alg, CJOSE_HDR_ALG_ES256K) == 0))
         digest_alg = EVP_sha256();
     else if ((strcmp(alg, CJOSE_HDR_ALG_RS384) == 0) || (strcmp(alg, CJOSE_HDR_ALG_PS384) == 0)
              || (strcmp(alg, CJOSE_HDR_ALG_ES384) == 0))
@@ -254,6 +271,13 @@ static bool _cjose_jws_build_dig_hmac_sha(cjose_jws_t *jws, const cjose_jwk_t *j
     bool retval = false;
     HMAC_CTX *ctx = NULL;
 
+    // ensure jwk is OCT: only then is keydata the raw key material
+    if (jwk->kty != CJOSE_JWK_KTY_OCT)
+    {
+        CJOSE_ERROR(err, CJOSE_ERR_INVALID_ARG);
+        return false;
+    }
+
     // make sure we have an alg header
     json_t *alg_obj = json_object_get(jws->hdr, CJOSE_HDR_ALG);
     if (NULL == alg_obj)
@@ -300,7 +324,7 @@ static bool _cjose_jws_build_dig_hmac_sha(cjose_jws_t *jws, const cjose_jwk_t *j
         goto _cjose_jws_build_dig_hmac_sha_cleanup;
     }
 
-// instantiate and initialize a new mac digest context
+    // instantiate and initialize a new mac digest context
 #if defined(CJOSE_OPENSSL_11X)
     ctx = HMAC_CTX_new();
 #else
@@ -554,10 +578,9 @@ static bool _cjose_jws_build_sig_ec(cjose_jws_t *jws, const cjose_jwk_t *jwk, cj
 {
     bool retval = false;
 
-    // ensure jwk is EC
-    if (jwk->kty != CJOSE_JWK_KTY_EC)
+    const char *alg = json_string_value(json_object_get(jws->hdr, CJOSE_HDR_ALG));
+    if (!_cjose_jws_validate_ec_key(alg, jwk, err))
     {
-        CJOSE_ERROR(err, CJOSE_ERR_INVALID_ARG);
         return false;
     }
 
@@ -575,6 +598,9 @@ static bool _cjose_jws_build_sig_ec(cjose_jws_t *jws, const cjose_jwk_t *jwk, cj
     switch (keydata->crv)
     {
     case CJOSE_JWK_EC_P_256:
+        jws->sig_len = 32 * 2;
+        break;
+    case CJOSE_JWK_EC_SECP_256K1:
         jws->sig_len = 32 * 2;
         break;
     case CJOSE_JWK_EC_P_384:
@@ -739,12 +765,14 @@ void cjose_jws_release(cjose_jws_t *jws)
     }
 
     cjose_get_dealloc()(jws->hdr_b64u);
-    cjose_get_dealloc()(jws->dat);
-    cjose_get_dealloc()(jws->dat_b64u);
+    // the payload may be sensitive: wipe it and the copies that embed it,
+    // like the decrypted plaintext of a JWE
+    _cjose_cleanse_dealloc(jws->dat, jws->dat_len);
+    _cjose_cleanse_dealloc(jws->dat_b64u, jws->dat_b64u_len);
     _cjose_cleanse_dealloc(jws->dig, jws->dig_len);
     _cjose_cleanse_dealloc(jws->sig, jws->sig_len);
     cjose_get_dealloc()(jws->sig_b64u);
-    cjose_get_dealloc()(jws->cser);
+    _cjose_cleanse_dealloc(jws->cser, jws->cser_len);
     cjose_get_dealloc()(jws);
 }
 
@@ -908,7 +936,7 @@ static bool _cjose_jws_verify_sig_ps(cjose_jws_t *jws, const cjose_jwk_t *jwk, c
 {
     bool retval = false;
     uint8_t *em = NULL;
-    size_t em_len = 0;
+    int em_len = 0;
 
     // ensure jwk is RSA
     if (jwk->kty != CJOSE_JWK_KTY_RSA)
@@ -943,15 +971,20 @@ static bool _cjose_jws_verify_sig_ps(cjose_jws_t *jws, const cjose_jwk_t *jwk, c
 
     // allocate buffer for encoded message
     em_len = RSA_size((RSA *)jwk->keydata);
-    em = (uint8_t *)cjose_get_alloc()(em_len);
+    if (em_len <= 0 || jws->sig_len != (size_t)em_len)
+    {
+        CJOSE_ERROR(err, CJOSE_ERR_INVALID_ARG);
+        goto _cjose_jws_verify_sig_ps_cleanup;
+    }
+    em = (uint8_t *)cjose_get_alloc()((size_t)em_len);
     if (NULL == em)
     {
-        CJOSE_ERROR(err, CJOSE_ERR_CRYPTO);
+        CJOSE_ERROR(err, CJOSE_ERR_NO_MEMORY);
         goto _cjose_jws_verify_sig_ps_cleanup;
     }
 
     // decrypt signature
-    if (RSA_public_decrypt(jws->sig_len, jws->sig, em, (RSA *)jwk->keydata, RSA_NO_PADDING) != em_len)
+    if (RSA_public_decrypt(em_len, jws->sig, em, (RSA *)jwk->keydata, RSA_NO_PADDING) != em_len)
     {
         CJOSE_ERROR(err, CJOSE_ERR_CRYPTO);
         goto _cjose_jws_verify_sig_ps_cleanup;
@@ -1039,7 +1072,7 @@ static bool _cjose_jws_verify_sig_hmac_sha(cjose_jws_t *jws, const cjose_jwk_t *
     diff |= (jws->sig_len != jws->dig_len);
     if (jws->sig_len == jws->dig_len)
     {
-        diff |= CRYPTO_memcmp(jws->dig, jws->sig, jws->dig_len);
+        diff |= cjose_const_memcmp(jws->dig, jws->sig, jws->dig_len);
     }
     if (diff != 0)
     {
@@ -1078,6 +1111,9 @@ static bool _cjose_jws_verify_sig_ec(cjose_jws_t *jws, const cjose_jwk_t *jwk, c
     switch (keydata->crv)
     {
     case CJOSE_JWK_EC_P_256:
+        coordlen = 32;
+        break;
+    case CJOSE_JWK_EC_SECP_256K1:
         coordlen = 32;
         break;
     case CJOSE_JWK_EC_P_384:
@@ -1139,6 +1175,253 @@ _cjose_jws_verify_sig_ec_cleanup:
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+static bool _cjose_jws_validate_ec_key(const char *alg, const cjose_jwk_t *jwk, cjose_err *err)
+{
+    if (jwk->kty != CJOSE_JWK_KTY_EC)
+    {
+        CJOSE_ERROR(err, CJOSE_ERR_INVALID_ARG);
+        return false;
+    }
+
+    ec_keydata *keydata = (ec_keydata *)jwk->keydata;
+
+    // RFC 8812 requires secp256k1 keys to be used only with ES256K and
+    // requires ES256K to use a secp256k1 key.
+    if ((strcmp(alg, CJOSE_HDR_ALG_ES256K) == 0) != (keydata->crv == CJOSE_JWK_EC_SECP_256K1))
+    {
+        CJOSE_ERROR(err, CJOSE_ERR_INVALID_ARG);
+        return false;
+    }
+
+    return true;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+#if defined(CJOSE_OPENSSL_111X)
+
+// the fixed size of an EdDSA signature (RFC 8032 sections 5.1.6 and 5.2.6)
+static size_t _cjose_jws_eddsa_sig_len(cjose_jwk_okp_curve crv)
+{
+    switch (crv)
+    {
+    case CJOSE_JWK_OKP_ED25519:
+        return 64;
+    case CJOSE_JWK_OKP_ED448:
+        return 114;
+    default:
+        return 0;
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+static bool _cjose_jws_validate_okp_key(const char *alg, const cjose_jwk_t *jwk, cjose_err *err)
+{
+    if (jwk->kty != CJOSE_JWK_KTY_OKP)
+    {
+        CJOSE_ERROR(err, CJOSE_ERR_INVALID_ARG);
+        return false;
+    }
+
+    okp_keydata *keydata = (okp_keydata *)jwk->keydata;
+
+    // RFC 9864 binds the fully-specified Ed25519 and Ed448 identifiers to a key
+    // of that curve, and an X25519/X448 key agreement key never signs (RFC 8037
+    // section 3.1); the polymorphic "EdDSA" identifier of RFC 8037, which RFC
+    // 9864 deprecates, is not supported
+    bool valid = false;
+    if (strcmp(alg, CJOSE_HDR_ALG_ED25519) == 0)
+    {
+        valid = (keydata->crv == CJOSE_JWK_OKP_ED25519);
+    }
+    else if (strcmp(alg, CJOSE_HDR_ALG_ED448) == 0)
+    {
+        valid = (keydata->crv == CJOSE_JWK_OKP_ED448);
+    }
+
+    if (!valid)
+    {
+        CJOSE_ERROR(err, CJOSE_ERR_INVALID_ARG);
+        return false;
+    }
+
+    return true;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+static bool _cjose_jws_build_dig_eddsa(cjose_jws_t *jws, const cjose_jwk_t *jwk, cjose_err *err)
+{
+    // PureEdDSA (RFC 8037 section 3.1) signs the message itself without a
+    // pre-hash, and OpenSSL only offers the one-shot EVP_DigestSign and
+    // EVP_DigestVerify for it: the "digest" is the JWS signing input
+    // B64U(HEADER).B64U(DATA) (RFC 7515 section 5.1)
+    if (NULL != jws->dig)
+    {
+        _cjose_cleanse_dealloc(jws->dig, jws->dig_len);
+        jws->dig = NULL;
+    }
+
+    // guard the length of the signing input (+ '.' separator) against size_t overflow
+    if (jws->dat_b64u_len > SIZE_MAX - 1 || jws->hdr_b64u_len > SIZE_MAX - 1 - jws->dat_b64u_len)
+    {
+        CJOSE_ERROR(err, CJOSE_ERR_INVALID_ARG);
+        return false;
+    }
+
+    jws->dig_len = jws->hdr_b64u_len + 1 + jws->dat_b64u_len;
+    jws->dig = (uint8_t *)cjose_get_alloc()(jws->dig_len);
+    if (NULL == jws->dig)
+    {
+        CJOSE_ERROR(err, CJOSE_ERR_NO_MEMORY);
+        return false;
+    }
+    memcpy(jws->dig, jws->hdr_b64u, jws->hdr_b64u_len);
+    jws->dig[jws->hdr_b64u_len] = '.';
+    memcpy(jws->dig + jws->hdr_b64u_len + 1, jws->dat_b64u, jws->dat_b64u_len);
+
+    return true;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+static bool _cjose_jws_build_sig_eddsa(cjose_jws_t *jws, const cjose_jwk_t *jwk, cjose_err *err)
+{
+    bool retval = false;
+    EVP_MD_CTX *ctx = NULL;
+    size_t sig_len = 0;
+
+    const char *alg = json_string_value(json_object_get(jws->hdr, CJOSE_HDR_ALG));
+    if (!_cjose_jws_validate_okp_key(alg, jwk, err))
+    {
+        return false;
+    }
+
+    okp_keydata *keydata = (okp_keydata *)jwk->keydata;
+
+    // signing needs the private key: OpenSSL 1.1.1 and 3.0.0 to 3.0.7 sign
+    // with the missing private key of a public-only key instead of failing
+    // (3.0.8 added the guard), so refuse it here rather than rely on OpenSSL;
+    // 1.1.1 only reports the absence of the private key when asked to copy
+    // it out, so copy it into a scratch buffer that is wiped right after
+    size_t priv_len = 0;
+    if (1 != EVP_PKEY_get_raw_private_key(keydata->key, NULL, &priv_len) || 0 == priv_len)
+    {
+        CJOSE_ERROR(err, CJOSE_ERR_INVALID_ARG);
+        return false;
+    }
+    uint8_t *priv = (uint8_t *)cjose_get_alloc()(priv_len);
+    if (NULL == priv)
+    {
+        CJOSE_ERROR(err, CJOSE_ERR_NO_MEMORY);
+        return false;
+    }
+    int has_priv = EVP_PKEY_get_raw_private_key(keydata->key, priv, &priv_len);
+    _cjose_cleanse_dealloc(priv, priv_len);
+    if (1 != has_priv)
+    {
+        CJOSE_ERROR(err, CJOSE_ERR_INVALID_ARG);
+        return false;
+    }
+
+    ctx = EVP_MD_CTX_new();
+    if (NULL == ctx)
+    {
+        CJOSE_ERROR(err, CJOSE_ERR_CRYPTO);
+        goto _cjose_jws_build_sig_eddsa_cleanup;
+    }
+
+    // PureEdDSA takes no digest algorithm
+    if (1 != EVP_DigestSignInit(ctx, NULL, NULL, NULL, keydata->key))
+    {
+        CJOSE_ERROR(err, CJOSE_ERR_CRYPTO);
+        goto _cjose_jws_build_sig_eddsa_cleanup;
+    }
+
+    // allocate buffer for signature: the fixed size of the curve
+    jws->sig_len = _cjose_jws_eddsa_sig_len(keydata->crv);
+    jws->sig = (uint8_t *)cjose_get_alloc()(jws->sig_len);
+    if (NULL == jws->sig)
+    {
+        CJOSE_ERROR(err, CJOSE_ERR_NO_MEMORY);
+        goto _cjose_jws_build_sig_eddsa_cleanup;
+    }
+
+    // sign the signing input in one shot
+    sig_len = jws->sig_len;
+    if (1 != EVP_DigestSign(ctx, jws->sig, &sig_len, jws->dig, jws->dig_len) || sig_len != jws->sig_len)
+    {
+        CJOSE_ERROR(err, CJOSE_ERR_CRYPTO);
+        goto _cjose_jws_build_sig_eddsa_cleanup;
+    }
+
+    // base64url encode the signature
+    if (!cjose_base64url_encode((const uint8_t *)jws->sig, jws->sig_len, &jws->sig_b64u, &jws->sig_b64u_len, err))
+    {
+        goto _cjose_jws_build_sig_eddsa_cleanup;
+    }
+
+    // if we got this far - success
+    retval = true;
+
+_cjose_jws_build_sig_eddsa_cleanup:
+    EVP_MD_CTX_free(ctx);
+
+    return retval;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+static bool _cjose_jws_verify_sig_eddsa(cjose_jws_t *jws, const cjose_jwk_t *jwk, cjose_err *err)
+{
+    bool retval = false;
+    EVP_MD_CTX *ctx = NULL;
+
+    const char *alg = json_string_value(json_object_get(jws->hdr, CJOSE_HDR_ALG));
+    if (!_cjose_jws_validate_okp_key(alg, jwk, err))
+    {
+        return false;
+    }
+
+    okp_keydata *keydata = (okp_keydata *)jwk->keydata;
+
+    // the signature has the fixed size of the curve; reject any other length
+    // before handing it to OpenSSL
+    if (jws->sig_len != _cjose_jws_eddsa_sig_len(keydata->crv))
+    {
+        CJOSE_ERROR(err, CJOSE_ERR_INVALID_ARG);
+        return false;
+    }
+
+    ctx = EVP_MD_CTX_new();
+    if (NULL == ctx)
+    {
+        CJOSE_ERROR(err, CJOSE_ERR_CRYPTO);
+        goto _cjose_jws_verify_sig_eddsa_cleanup;
+    }
+
+    // PureEdDSA takes no digest algorithm
+    if (1 != EVP_DigestVerifyInit(ctx, NULL, NULL, NULL, keydata->key))
+    {
+        CJOSE_ERROR(err, CJOSE_ERR_CRYPTO);
+        goto _cjose_jws_verify_sig_eddsa_cleanup;
+    }
+
+    // verify the signature over the signing input in one shot
+    if (1 != EVP_DigestVerify(ctx, jws->sig, jws->sig_len, jws->dig, jws->dig_len))
+    {
+        CJOSE_ERROR(err, CJOSE_ERR_CRYPTO);
+        goto _cjose_jws_verify_sig_eddsa_cleanup;
+    }
+
+    // if we got this far - success
+    retval = true;
+
+_cjose_jws_verify_sig_eddsa_cleanup:
+    EVP_MD_CTX_free(ctx);
+
+    return retval;
+}
+
+#endif // CJOSE_OPENSSL_111X
+
+////////////////////////////////////////////////////////////////////////////////
 static bool _cjose_jws_validate_verify_key(cjose_jws_t *jws, const cjose_jwk_t *jwk, cjose_err *err)
 {
     json_t *alg_obj = json_object_get(jws->hdr, CJOSE_HDR_ALG);
@@ -1155,28 +1438,41 @@ static bool _cjose_jws_validate_verify_key(cjose_jws_t *jws, const cjose_jwk_t *
         return false;
     }
 
-    if (((0 == strcmp(alg, CJOSE_HDR_ALG_PS256)) || (0 == strcmp(alg, CJOSE_HDR_ALG_PS384)) || (0 == strcmp(alg, CJOSE_HDR_ALG_PS512))
-         || (0 == strcmp(alg, CJOSE_HDR_ALG_RS256)) || (0 == strcmp(alg, CJOSE_HDR_ALG_RS384))
-         || (0 == strcmp(alg, CJOSE_HDR_ALG_RS512)))
+    if (((0 == strcmp(alg, CJOSE_HDR_ALG_PS256)) || (0 == strcmp(alg, CJOSE_HDR_ALG_PS384))
+         || (0 == strcmp(alg, CJOSE_HDR_ALG_PS512)) || (0 == strcmp(alg, CJOSE_HDR_ALG_RS256))
+         || (0 == strcmp(alg, CJOSE_HDR_ALG_RS384)) || (0 == strcmp(alg, CJOSE_HDR_ALG_RS512)))
         && jwk->kty != CJOSE_JWK_KTY_RSA)
     {
         CJOSE_ERROR(err, CJOSE_ERR_INVALID_ARG);
         return false;
     }
 
-    if (((0 == strcmp(alg, CJOSE_HDR_ALG_HS256)) || (0 == strcmp(alg, CJOSE_HDR_ALG_HS384)) || (0 == strcmp(alg, CJOSE_HDR_ALG_HS512)))
+    if (((0 == strcmp(alg, CJOSE_HDR_ALG_HS256)) || (0 == strcmp(alg, CJOSE_HDR_ALG_HS384))
+         || (0 == strcmp(alg, CJOSE_HDR_ALG_HS512)))
         && jwk->kty != CJOSE_JWK_KTY_OCT)
     {
         CJOSE_ERROR(err, CJOSE_ERR_INVALID_ARG);
         return false;
     }
 
-    if (((0 == strcmp(alg, CJOSE_HDR_ALG_ES256)) || (0 == strcmp(alg, CJOSE_HDR_ALG_ES384)) || (0 == strcmp(alg, CJOSE_HDR_ALG_ES512)))
-        && jwk->kty != CJOSE_JWK_KTY_EC)
+    if ((0 == strcmp(alg, CJOSE_HDR_ALG_ES256)) || (0 == strcmp(alg, CJOSE_HDR_ALG_ES256K))
+        || (0 == strcmp(alg, CJOSE_HDR_ALG_ES384)) || (0 == strcmp(alg, CJOSE_HDR_ALG_ES512)))
     {
-        CJOSE_ERROR(err, CJOSE_ERR_INVALID_ARG);
-        return false;
+        if (!_cjose_jws_validate_ec_key(alg, jwk, err))
+        {
+            return false;
+        }
     }
+
+#if defined(CJOSE_OPENSSL_111X)
+    if ((0 == strcmp(alg, CJOSE_HDR_ALG_ED25519)) || (0 == strcmp(alg, CJOSE_HDR_ALG_ED448)))
+    {
+        if (!_cjose_jws_validate_okp_key(alg, jwk, err))
+        {
+            return false;
+        }
+    }
+#endif
 
     return true;
 }

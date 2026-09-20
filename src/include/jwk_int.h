@@ -52,15 +52,20 @@ typedef struct _ec_keydata_int
     EC_KEY *key;
 } ec_keydata;
 
+// OKP-specific keydata (RFC 8037): the EVP_PKEY holds the raw Ed25519,
+// Ed448, X25519 or X448 key
+typedef struct _okp_keydata_int
+{
+    cjose_jwk_okp_curve crv;
+    EVP_PKEY *key;
+} okp_keydata;
+
 // RSA-specific keydata = OpenSSL RSA struct
 // (just uses RSA struct)
 void _cjose_jwk_rsa_get(RSA *rsa, BIGNUM **n, BIGNUM **e, BIGNUM **d);
 
-bool cjose_jwk_derive_ecdh_bits(const cjose_jwk_t *jwk_self,
-                                const cjose_jwk_t *jwk_peer,
-                                uint8_t **output,
-                                size_t *output_len,
-                                cjose_err *err);
+bool cjose_jwk_derive_ecdh_bits(
+    const cjose_jwk_t *jwk_self, const cjose_jwk_t *jwk_peer, uint8_t **output, size_t *output_len, cjose_err *err);
 
 // HKDF implementation, note it currrently supports only SHA256, no info
 // and okm must be exactly 32 bytes.

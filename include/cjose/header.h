@@ -51,6 +51,9 @@ extern "C" {
 /** The JWE algorithm attribute value for RSA-OAEP. */
 #define CJOSE_HDR_ALG_RSA_OAEP "RSA-OAEP"
 
+/** The JWE algorithm attribute value for RSA-OAEP-256 (RSAES OAEP using SHA-256 and MGF1 with SHA-256). */
+#define CJOSE_HDR_ALG_RSA_OAEP_256 "RSA-OAEP-256"
+
 /** The JWE algorithm attribute value for RSA1_5. */
 #define CJOSE_HDR_ALG_RSA1_5 "RSA1_5"
 
@@ -58,6 +61,11 @@ extern "C" {
 #define CJOSE_HDR_ALG_A128KW "A128KW"
 #define CJOSE_HDR_ALG_A192KW "A192KW"
 #define CJOSE_HDR_ALG_A256KW "A256KW"
+
+/** The JWE algorithm attribute value for ECDH-ES with A128KW, A192KW or A256KW key wrapping. */
+#define CJOSE_HDR_ALG_ECDH_ES_A128KW "ECDH-ES+A128KW"
+#define CJOSE_HDR_ALG_ECDH_ES_A192KW "ECDH-ES+A192KW"
+#define CJOSE_HDR_ALG_ECDH_ES_A256KW "ECDH-ES+A256KW"
 
 /** The JWS algorithm attribute value for PS256, PS384 and PS512. */
 #define CJOSE_HDR_ALG_PS256 "PS256"
@@ -74,10 +82,15 @@ extern "C" {
 #define CJOSE_HDR_ALG_HS384 "HS384"
 #define CJOSE_HDR_ALG_HS512 "HS512"
 
-/** The JWS algorithm attribute values for ES256, ES384 and ES512. */
+/** The JWS algorithm attribute values for ES256, ES256K, ES384 and ES512. */
 #define CJOSE_HDR_ALG_ES256 "ES256"
+#define CJOSE_HDR_ALG_ES256K "ES256K"
 #define CJOSE_HDR_ALG_ES384 "ES384"
 #define CJOSE_HDR_ALG_ES512 "ES512"
+
+/** The JWS algorithm attribute values for the fully-specified EdDSA algorithms Ed25519 and Ed448 (RFC 9864). */
+#define CJOSE_HDR_ALG_ED25519 "Ed25519"
+#define CJOSE_HDR_ALG_ED448 "Ed448"
 
 /** The JWE algorithm attribute value for "dir". */
 #define CJOSE_HDR_ALG_DIR "dir"

@@ -1,5 +1,18 @@
 # Release Notes #
 
+<a name="unreleased"></a>
+## [Unreleased](https://github.com/cisco/cjose/0.7.0..master)
+
+### Update
+
+* Add the RSA-OAEP-256 key encryption algorithm of RFC 7518 section 4.3 (RSAES OAEP using SHA-256 and MGF1 with SHA-256); needs OpenSSL 1.0.2
+* Add the Octet Key Pair (OKP) JWK type of RFC 8037 holding an Ed25519 or Ed448 signature key (RFC 8032) or an X25519 or X448 key agreement key (RFC 7748): cjose_jwk_create_OKP_random, cjose_jwk_create_OKP_spec, cjose_jwk_OKP_get_curve and import/export; needs OpenSSL 1.1.1
+* Add the fully-specified EdDSA JWS signing algorithms Ed25519 and Ed448 of RFC 9864 over OKP keys; the polymorphic "EdDSA" identifier of RFC 8037, which RFC 9864 deprecates, is not supported
+
+### Fix
+
+* Check the key type before the HMAC digest step: cjose_jws_sign with an HS256, HS384 or HS512 header and an EC or RSA key ran the HMAC over the key structure and past the end of its allocation before failing with CJOSE_ERR_INVALID_ARG
+
 <a name="0.7.0"></a>
 ## [0.7.0](https://github.com/cisco/cjose/0.6.3..0.7.0)  (2026-09-09)
 

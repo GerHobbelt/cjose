@@ -6,7 +6,11 @@ on:
     branches: [master]
 
 jobs:
+  format:
+    uses: ./.github/workflows/format.yml
+
   linux:
+    needs: format
     runs-on: ubuntu-latest
     name: Linux ${{ matrix.cc }}, RSA1_5 ${{ matrix.rsa1_5 }}
 
@@ -39,6 +43,7 @@ jobs:
       run: valgrind --leak-check=full --error-exitcode=1 --show-possibly-lost=no ../build/check_cjose
 
   macos:
+    needs: format
     runs-on: macos-latest
     name: macOS clang
 
@@ -56,13 +61,14 @@ jobs:
       run: ctest --test-dir build --output-on-failure
 
   windows:
+    needs: format
     runs-on: windows-latest
     name: Windows MSVC (vcpkg)
 
     steps:
     - uses: actions/checkout@v5
     - name: Cache vcpkg binary archives
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: ${{ env.LOCALAPPDATA }}\vcpkg\archives
         key: vcpkg-archives-${{ runner.os }}-x64-windows-openssl-jansson-check

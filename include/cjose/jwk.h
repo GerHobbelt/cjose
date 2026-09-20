@@ -17,7 +17,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
-#include <openssl/obj_mac.h>
 #include "cjose/error.h"
 #include "cjose/header.h"
 
@@ -33,7 +32,9 @@ typedef enum
     /** Elliptic Curve Public (or Private) Key */
     CJOSE_JWK_KTY_EC,
     /** Octet String (Symmetric) Key */
-    CJOSE_JWK_KTY_OCT
+    CJOSE_JWK_KTY_OCT,
+    /** Octet Key Pair (RFC 8037) Public (or Private) Key */
+    CJOSE_JWK_KTY_OKP
 } cjose_jwk_kty_t;
 
 /**
@@ -215,12 +216,19 @@ cjose_jwk_t *cjose_jwk_create_RSA_spec(const cjose_jwk_rsa_keyspec *spec, cjose_
 /** Enumeration of supported Elliptic-Curve types */
 typedef enum
 {
-    /** NIST P-256 Prime Curve (secp256r1) */
-    CJOSE_JWK_EC_P_256 = NID_X9_62_prime256v1,
-    /** NIST P-384 Prime Curve (secp384r1) */
-    CJOSE_JWK_EC_P_384 = NID_secp384r1,
-    /** NIST P-521 Prime Curve (secp521r1) */
-    CJOSE_JWK_EC_P_521 = NID_secp521r1,
+    /** NIST P-256 Prime Curve (secp256r1).
+     *
+     * The explicit value preserves the ABI of earlier cjose releases without
+     * requiring OpenSSL's obj_mac.h in this public header.
+     * TODO: Remove this binary compatibility when moved to 1.0.x series.
+     */
+    CJOSE_JWK_EC_P_256 = 415,
+    /** SECG secp256k1 curve. */
+    CJOSE_JWK_EC_SECP_256K1 = 714,
+    /** NIST P-384 Prime Curve (secp384r1). */
+    CJOSE_JWK_EC_P_384 = 715,
+    /** NIST P-521 Prime Curve (secp521r1). */
+    CJOSE_JWK_EC_P_521 = 716,
     /** Invalid Curve */
     CJOSE_JWK_EC_INVALID = -1
 } cjose_jwk_ec_curve;
@@ -313,6 +321,87 @@ cjose_jwk_t *cjose_jwk_create_oct_random(size_t size, cjose_err *err);
  * \returns The symmetric JWK object for the given raw key data.
  */
 cjose_jwk_t *cjose_jwk_create_oct_spec(const uint8_t *data, size_t len, cjose_err *err);
+
+/** Enumeration of supported curves for Octet Key Pair (OKP) JWK objects (RFC 8037).
+ *
+ * The explicit values match OpenSSL's NIDs for the curves, like the Elliptic
+ * Curve enumeration above, without requiring OpenSSL's obj_mac.h in this
+ * public header.
+ */
+typedef enum
+{
+    /** Ed25519 signature curve (edwards25519, RFC 8032). */
+    CJOSE_JWK_OKP_ED25519 = 1087,
+    /** Ed448 signature curve (edwards448, RFC 8032). */
+    CJOSE_JWK_OKP_ED448 = 1088,
+    /** X25519 key agreement curve (curve25519, RFC 7748). */
+    CJOSE_JWK_OKP_X25519 = 1034,
+    /** X448 key agreement curve (curve448, RFC 7748). */
+    CJOSE_JWK_OKP_X448 = 1035,
+    /** Invalid Curve */
+    CJOSE_JWK_OKP_INVALID = -1
+} cjose_jwk_okp_curve;
+
+/** Key specification for Octet Key Pair (OKP) JWK objects. */
+typedef struct
+{
+    /** The curve */
+    cjose_jwk_okp_curve crv;
+    /** The raw private key (RFC 8037 "d"), or NULL for a public key */
+    uint8_t *d;
+    /** Length of <tt>d</tt>: the fixed key size of the curve, or 0 */
+    size_t dlen;
+    /** The raw public key (RFC 8037 "x") */
+    uint8_t *x;
+    /** Length of <tt>x</tt>: the fixed key size of the curve, or 0 */
+    size_t xlen;
+} cjose_jwk_okp_keyspec;
+
+/**
+ * Creates a new Octet Key Pair (OKP) JWK, using a secure random number
+ * generator.
+ *
+ * \b NOTE: The caller MUST call cjose_jwk_release() to release the JWK's
+ * resources.
+ *
+ * \b NOTE: OKP keys require OpenSSL 1.1.1 or later; with an older OpenSSL
+ * this function fails with CJOSE_ERR_INVALID_ARG.
+ *
+ * \param crv The curve to generate the key pair for
+ * \param err [out] An optional error object which can be used to get additional
+ *        information in the event of an error.
+ * \returns The generated Octet Key Pair JWK object
+ */
+cjose_jwk_t *cjose_jwk_create_OKP_random(cjose_jwk_okp_curve crv, cjose_err *err);
+
+/**
+ * Creates a new Octet Key Pair (OKP) JWK, using the given raw values for the
+ * private and/or public key. When only the private key is given the public
+ * key is derived from it; when both are given they must belong together.
+ *
+ * \b NOTE: The caller MUST call cjose_jwk_release() to release the JWK's
+ * resources.
+ *
+ * \b NOTE: This function makes a copy of all provided data; the caller
+ * MUST free the memory for <tt>spec</tt> after calling this function.
+ *
+ * \param spec The specified Octet Key Pair properties
+ * \param err [out] An optional error object which can be used to get additional
+ *        information in the event of an error.
+ * \returns The generated Octet Key Pair JWK object
+ */
+cjose_jwk_t *cjose_jwk_create_OKP_spec(const cjose_jwk_okp_keyspec *spec, cjose_err *err);
+
+/**
+ * Obtains the curve for the given (OKP) JWK.
+ *
+ * \param jwk [in] The OKP JWK to inspect
+ * \param err [out] An optional error object which can be used to get additional
+ *        information in the event of an error.
+ * \returns The curve type, or CJOSE_JWK_OKP_INVALID if <tt>jwk</tt> is not an
+ *        OKP key
+ */
+cjose_jwk_okp_curve cjose_jwk_OKP_get_curve(const cjose_jwk_t *jwk, cjose_err *err);
 
 /**
  * Instantiates a new JWK given a JSON document representation conforming

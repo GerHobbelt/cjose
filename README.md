@@ -6,6 +6,53 @@
 
 Implementation of JOSE for C/C++
 
+## Supported Algorithms ##
+
+JWS signing algorithms (`alg`):
+
+| Identifier | Algorithm | Requires |
+|------------|-----------|----------|
+| `HS256`, `HS384`, `HS512` | HMAC with SHA-2 | |
+| `RS256`, `RS384`, `RS512` | RSASSA-PKCS1-v1_5 with SHA-2 | |
+| `PS256`, `PS384`, `PS512` | RSASSA-PSS with SHA-2 | |
+| `ES256`, `ES384`, `ES512` | ECDSA with P-256, P-384 and P-521 | |
+| `ES256K` | ECDSA with secp256k1 | OpenSSL built with `secp256k1` |
+| `Ed25519`, `Ed448` | EdDSA (RFC 9864) | OpenSSL 1.1.1 |
+
+The polymorphic `EdDSA` identifier of RFC 8037, deprecated by RFC 9864, and
+`none` are not accepted.
+
+JWE key management algorithms (`alg`):
+
+| Identifier | Algorithm | Requires |
+|------------|-----------|----------|
+| `RSA-OAEP` | RSAES OAEP with SHA-1 and MGF1 with SHA-1 | |
+| `RSA-OAEP-256` | RSAES OAEP with SHA-256 and MGF1 with SHA-256 | OpenSSL 1.0.2 |
+| `RSA1_5` | RSAES-PKCS1-v1_5 | build option `CJOSE_ENABLE_RSA1_5` |
+| `A128KW`, `A192KW`, `A256KW` | AES Key Wrap | |
+| `dir` | direct use of a shared symmetric key | |
+| `ECDH-ES` | ECDH-ES direct key agreement | |
+| `ECDH-ES+A128KW`, `ECDH-ES+A192KW`, `ECDH-ES+A256KW` | ECDH-ES with AES Key Wrap | |
+
+JWE content encryption algorithms (`enc`):
+
+| Identifier | Algorithm |
+|------------|-----------|
+| `A128GCM`, `A192GCM`, `A256GCM` | AES GCM |
+| `A128CBC-HS256`, `A192CBC-HS384`, `A256CBC-HS512` | AES CBC with HMAC SHA-2 |
+
+JWK key types (`kty`):
+
+| Identifier | Keys | Requires |
+|------------|------|----------|
+| `RSA` | RSA | |
+| `EC` | `P-256`, `P-384`, `P-521`, `secp256k1` | `secp256k1`: OpenSSL built with it |
+| `oct` | symmetric | |
+| `OKP` | `Ed25519`, `Ed448`, `X25519`, `X448` | OpenSSL 1.1.1 |
+
+JWEs can be produced and consumed in both the compact and the JSON
+serialization, with one or more recipients.
+
 ## Prerequisites ##
 
 *MAC OS X* All of the prerequisites can be installed via [brew](http://brew.sh/).
@@ -14,7 +61,7 @@ Implementation of JOSE for C/C++
 
 * CMake (>= 3.22)
 * A C99 compiler (LLVM/Clang >= 5.1, GCC >= 4.5 or MSVC >= 14)
-* Check (>= 0.12.0) - unit testing (e.g. check-devel)
+* Check (>= 0.9.4) - unit testing (e.g. check-devel)
 * Doxygen (>= 1.8) - API documentation (optional)
 * clang-format - source formatting (optional)
 
@@ -93,8 +140,15 @@ After installing, consume cjose from a CMake project via `find_package`:
 
 The `cjose::cjose` target aliases the shared/dynamic library when it is built,
 or the static library when `CJOSE_BUILD_SHARED=OFF`. The explicit
-`cjose::cjose_shared` and `cjose::cjose_static` targets are also available when
-their corresponding library types are built.
+`cjose::cjose_shared` target is also available when that library type is built.
+Using the shared library does not require the OpenSSL or Jansson development
+packages on the consuming system.
+
+Static consumers need cjose's private dependencies and can request them and the
+explicit static target with:
+
+    find_package(cjose REQUIRED COMPONENTS static)
+    target_link_libraries(myapp PRIVATE cjose::cjose_static)
 
 Alternatively, embed the sources directly with `add_subdirectory()` or
 `FetchContent`; the same CMake targets are provided.
