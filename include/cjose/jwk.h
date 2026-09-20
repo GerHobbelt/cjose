@@ -95,13 +95,19 @@ cjose_jwk_kty_t cjose_jwk_get_kty(const cjose_jwk_t *jwk, cjose_err *err);
 size_t cjose_jwk_get_keysize(const cjose_jwk_t *jwk, cjose_err *err);
 
 /**
- * Retrieves the raw key data for this JWK.
+ * Retrieves the key data owned by this JWK.
  *
- * \b WARNING: this is the raw data specific to the key type, and could
- * contain private key material.
- * \b NOTE: This key data will be released when the key is released.
+ * For octet keys, the returned pointer addresses the raw key bytes. For all
+ * other key types, it refers to an implementation-specific representation and
+ * must be treated as opaque.
+ *
+ * \b WARNING: The returned data may contain private key material.
+ * \b NOTE: The data is borrowed and must not be modified or freed. It will be
+ * released when the key is released.
  *
  * \param jwk The JWK to retrieve key data from
+ * \param err [out] An optional error object which can be used to get additional
+ *        information in the event of an error.
  * \returns The key data specific to the type of key
  */
 void *cjose_jwk_get_keydata(const cjose_jwk_t *jwk, cjose_err *err);
@@ -364,9 +370,6 @@ typedef struct
  * \b NOTE: The caller MUST call cjose_jwk_release() to release the JWK's
  * resources.
  *
- * \b NOTE: OKP keys require OpenSSL 1.1.1 or later; with an older OpenSSL
- * this function fails with CJOSE_ERR_INVALID_ARG.
- *
  * \param crv The curve to generate the key pair for
  * \param err [out] An optional error object which can be used to get additional
  *        information in the event of an error.
@@ -446,8 +449,8 @@ cjose_jwk_t *cjose_jwk_import_json(cjose_header_t *json, cjose_err *err);
  * Note: on successful return of a jwk_ecdh_ephemeral_key, the caller becomes
  * responsible for releasing that JWK wuth the cjose_jwk_release() command.
  *
- * \param jwk_self [in] The caller's own EC key pair.
- * \param jwk_peer [in] The peer's EC public key.
+ * \param jwk_self [in] The caller's own key pair: an EC key, or an OKP key on X25519 or X448.
+ * \param jwk_peer [in] The peer's public key, of the same type and on the same curve.
  * \param salt [in] An optional salt to apply to the HMAC calculation. Unless FIPS mode is required this can be empty.
  * \param salt_len [in] The length of the optional salt.
  * \param err [out] An optional error object which can be used to get additional

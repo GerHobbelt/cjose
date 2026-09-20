@@ -11,36 +11,13 @@
 #include <cjose/error.h>
 
 #include <jansson.h>
-#include <openssl/opensslv.h>
+#include <stddef.h>
 #include <string.h>
-
-#if OPENSSL_VERSION_NUMBER >= 0x10100005L && !defined(LIBRESSL_VERSION_NUMBER)
-#define CJOSE_OPENSSL_11X
-#endif
-
-// the raw key API (EVP_PKEY_new_raw_private_key & co.) and PureEdDSA arrived
-// in OpenSSL 1.1.1; the OKP key type and the EdDSA algorithms depend on them
-#if OPENSSL_VERSION_NUMBER >= 0x10101000L && !defined(LIBRESSL_VERSION_NUMBER)
-#define CJOSE_OPENSSL_111X
-#endif
-
-// OpenSSL 1.0.2 (and LibreSSL 2.7) added the OAEP padding functions that take
-// the digest for the hash and for MGF1, RSA_padding_add_PKCS1_OAEP_mgf1 and
-// RSA_padding_check_PKCS1_OAEP_mgf1, which RSA-OAEP-256 needs
-#if (OPENSSL_VERSION_NUMBER >= 0x10002000L && !defined(LIBRESSL_VERSION_NUMBER)) \
-    || (defined(LIBRESSL_VERSION_NUMBER) && LIBRESSL_VERSION_NUMBER >= 0x2070000fL)
-#define CJOSE_OPENSSL_102X
-#endif
-
-#ifdef _WIN32
-#include <BaseTsd.h>
-typedef SSIZE_T ssize_t;
-#endif
 
 // NOTE: unlike POSIX strndup this copies exactly len bytes (len < 0 means
 // strlen(str)); it does not stop at an embedded NUL, so len must not exceed
 // strlen(str) or the copy over-reads str.
-char *_cjose_strndup(const char *str, ssize_t len, cjose_err *err);
+char *_cjose_strndup(const char *str, ptrdiff_t len, cjose_err *err);
 json_t *_cjose_json_stringn(const char *value, size_t len, cjose_err *err);
 
 void *cjose_alloc3_default(size_t n, const char *file, int line);

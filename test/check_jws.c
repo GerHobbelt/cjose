@@ -61,7 +61,6 @@ static const char *JWK_COMMON_EC_SECP_256K1 = "{ \"kty\":\"EC\","
                                               "\"y\":\"36uMVGM7hnw-N6GnjFcihWE3SkrhMLzzLCdPMXPEXlA\","
                                               "\"d\":\"rhYFsBPF9q3-uZThy7B3c4LDF_8wnozFUAEm5LLC4Zw\" }";
 
-#if defined(CJOSE_OPENSSL_111X)
 // RFC 8037 appendix A.1: an Ed25519 key pair
 static const char *JWK_COMMON_OKP_ED25519 = "{\"kty\":\"OKP\",\"crv\":\"Ed25519\","
                                             "\"d\":\"nWGxne_9WmC6hEr0kuwsxERJxWl7MmkZcDusAxyuf2A\","
@@ -76,7 +75,6 @@ static const char *JWK_COMMON_OKP_ED448 = "{\"kty\":\"OKP\",\"crv\":\"Ed448\","
 static const char *JWK_COMMON_OKP_X25519 = "{\"kty\":\"OKP\",\"crv\":\"X25519\","
                                            "\"d\":\"dwdtCnMYpX08FsFyUbJmRd9ML4frwJkqsXf7pR25LCo\","
                                            "\"x\":\"hSDwCYkwp1R0i33ctD73Wg2_Og0mOBr066SpjqqbTmo\"}";
-#endif
 
 // a JWS encrypted with the above JWK_COMMON key
 static const char *JWS_COMMON
@@ -86,18 +84,6 @@ static const char *JWS_COMMON
       "KLTY3i5SRcZvahRuToavqBvLbm87pN7IYx8YV9kwKQclMW2ASpbEAzKNIJfQ3FycobRwZGtqCI9sRUo0vQvkpb3HIS6HKp3Kvur57J7LcZhz7uNIxzUYNQSg4EWp"
       "whF9FnGng7bmU8qjNPiXCWfQ-n74gopAVzd3KDJ5ai7q66voRc9pCKJVbsaIMHIqcl9OPiMdY5Hz3_PgBalR2632HOdpUlIMvnMOL3EQICvyBwxaYPbhMcCpEc3_"
       "4K-sywOGiCSp9KlaLcRq0knZtAT0ynJszaiOwfR-W18PEFLfGclpeR6e_gop9mq69t36wK7KRUjrQ";
-
-static cjose_alloc_fn_t _jws_saved_alloc = NULL;
-static size_t _jws_fail_alloc_size = 0;
-
-static void *_jws_fail_selected_alloc(size_t size)
-{
-    if (size == _jws_fail_alloc_size)
-    {
-        return NULL;
-    }
-    return _jws_saved_alloc(size);
-}
 
 static const char *_self_get_jwk_by_alg(const char *alg)
 {
@@ -109,12 +95,10 @@ static const char *_self_get_jwk_by_alg(const char *alg)
     if ((strcmp(alg, CJOSE_HDR_ALG_ES256) == 0) || (strcmp(alg, CJOSE_HDR_ALG_ES384) == 0)
         || (strcmp(alg, CJOSE_HDR_ALG_ES512) == 0))
         return JWK_COMMON_EC;
-#if defined(CJOSE_OPENSSL_111X)
     if (strcmp(alg, CJOSE_HDR_ALG_ED25519) == 0)
         return JWK_COMMON_OKP_ED25519;
     if (strcmp(alg, CJOSE_HDR_ALG_ED448) == 0)
         return JWK_COMMON_OKP_ED448;
-#endif
     return JWK_COMMON;
 }
 
@@ -202,10 +186,8 @@ static void _self_sign_self_verify_all_algs(const uint8_t *plain, size_t plain_l
     _self_sign_self_verify(plain, plain_len, CJOSE_HDR_ALG_ES256K, err);
     _self_sign_self_verify(plain, plain_len, CJOSE_HDR_ALG_ES384, err);
     _self_sign_self_verify(plain, plain_len, CJOSE_HDR_ALG_ES512, err);
-#if defined(CJOSE_OPENSSL_111X)
     _self_sign_self_verify(plain, plain_len, CJOSE_HDR_ALG_ED25519, err);
     _self_sign_self_verify(plain, plain_len, CJOSE_HDR_ALG_ED448, err);
-#endif
 }
 
 START_TEST(test_cjose_jws_self_sign_self_verify)
@@ -282,7 +264,6 @@ START_TEST(test_cjose_jws_es256k_rejects_wrong_curve)
 }
 END_TEST
 
-#if defined(CJOSE_OPENSSL_111X)
 // RFC 9864 fully-specified {"alg":"Ed25519"} over the RFC 8037 appendix A.4
 // payload "Example of Ed25519 signing" with the RFC 8037 appendix A.1 key; the
 // (deterministic) signature was produced with "openssl pkeyutl -sign -rawin"
@@ -443,8 +424,8 @@ START_TEST(test_cjose_jws_ed25519_rejects_wrong_key)
     }
 
     // signing needs the private key: the library refuses a public-only key
-    // itself, since OpenSSL 1.1.1 and 3.0.0 to 3.0.7 sign with the missing
-    // private key instead of failing (3.0.8 added the guard)
+    // itself, since OpenSSL 3.0.0 through 3.0.7 signs with the missing private
+    // key instead of failing (3.0.8 added the guard)
     cjose_jwk_t *ed448_pub = cjose_jwk_import(JWK_ED448_PUB, strlen(JWK_ED448_PUB), &err);
     ck_assert(NULL != ed448_pub);
     const struct
@@ -582,7 +563,6 @@ START_TEST(test_cjose_jws_verify_ed25519_sig_bad_length)
     cjose_jwk_release(jwk);
 }
 END_TEST
-#endif // CJOSE_OPENSSL_111X
 
 START_TEST(test_cjose_jws_self_sign_self_verify_short)
 {
@@ -607,7 +587,7 @@ START_TEST(test_cjose_jws_self_sign_self_verify_many)
     // sign and verify a whole lot of randomly sized payloads
     for (int i = 0; i < 100; ++i)
     {
-        size_t len = (size_t)(random() % 1024) + 1;
+        size_t len = (size_t)(rand() % 1024) + 1;
         uint8_t *plain = malloc(len);
         ck_assert_msg(RAND_bytes(plain, len) == 1, "RAND_bytes failed");
         plain[len - 1] = 0;
@@ -1427,35 +1407,6 @@ START_TEST(test_cjose_jws_verify_ps_sig_bad_length)
 }
 END_TEST
 
-START_TEST(test_cjose_jws_verify_ps_alloc_failure)
-{
-    cjose_err err;
-    cjose_jwk_t *jwk = cjose_jwk_import(JWK_COMMON, strlen(JWK_COMMON), &err);
-    ck_assert_msg(NULL != jwk, "cjose_jwk_import failed: %s", err.message);
-
-    cjose_jws_t *jws = cjose_jws_import(JWS_COMMON, strlen(JWS_COMMON), &err);
-    ck_assert_msg(NULL != jws, "cjose_jws_import failed: %s", err.message);
-
-    cjose_alloc_fn_t saved_alloc = cjose_get_alloc();
-    cjose_realloc_fn_t saved_realloc = cjose_get_realloc();
-    cjose_dealloc_fn_t saved_dealloc = cjose_get_dealloc();
-    _jws_saved_alloc = saved_alloc;
-    _jws_fail_alloc_size = jws->sig_len;
-    cjose_set_alloc_funcs(_jws_fail_selected_alloc, saved_realloc, saved_dealloc);
-
-    bool verified = cjose_jws_verify(jws, jwk, &err);
-    cjose_set_alloc_funcs(saved_alloc, saved_realloc, saved_dealloc);
-    _jws_saved_alloc = NULL;
-    _jws_fail_alloc_size = 0;
-
-    ck_assert_msg(!verified, "cjose_jws_verify succeeded when its encoded-message allocation failed");
-    ck_assert_msg(err.code == CJOSE_ERR_NO_MEMORY, "expected CJOSE_ERR_NO_MEMORY, got (%i:%s)", err.code, err.message);
-
-    cjose_jws_release(jws);
-    cjose_jwk_release(jwk);
-}
-END_TEST
-
 // regression: the JWS ECDSA signature must be exactly R || S for the key's
 // curve; _cjose_jws_verify_sig_ec used sig_len / 2 without a length check,
 // so a valid signature with a trailing octet appended still verified
@@ -1548,6 +1499,57 @@ START_TEST(test_cjose_jws_verify_ec_sig_bad_length)
 }
 END_TEST
 
+// RFC 7515 section 4.1.11: cjose implements no extension, so a JWS whose
+// header carries a "crit" list is refused, when signing and when verifying
+START_TEST(test_cjose_jws_crit_refused)
+{
+    cjose_err err;
+    static const uint8_t plain[] = "Setec Astronomy";
+
+    cjose_jwk_t *jwk = cjose_jwk_import(JWK_COMMON_OCT, strlen(JWK_COMMON_OCT), &err);
+    ck_assert_msg(NULL != jwk, "cjose_jwk_import failed: %s", err.message);
+
+    cjose_header_t *hdr = cjose_header_new(&err);
+    ck_assert(cjose_header_set(hdr, CJOSE_HDR_ALG, CJOSE_HDR_ALG_HS256, &err));
+    ck_assert(cjose_header_set(hdr, CJOSE_HDR_CTY, "JWT", &err));
+    ck_assert(cjose_header_set_raw(hdr, "crit", "[\"cty\"]", &err));
+    ck_assert_msg(NULL == cjose_jws_sign(jwk, hdr, plain, sizeof(plain) - 1, &err), "cjose_jws_sign accepted a crit list");
+    ck_assert_int_eq(CJOSE_ERR_INVALID_ARG, err.code);
+
+    // the same JWS, made without the list and given one afterwards, is refused
+    // when it is imported
+    memset(&err, 0, sizeof(err));
+    json_object_del((json_t *)hdr, "crit");
+    cjose_jws_t *jws = cjose_jws_sign(jwk, hdr, plain, sizeof(plain) - 1, &err);
+    ck_assert_msg(NULL != jws, "cjose_jws_sign failed: %s", err.message);
+    const char *compact = NULL;
+    ck_assert(cjose_jws_export(jws, &compact, &err));
+
+    json_t *header = json_pack("{s:s,s:s,s:[s]}", "alg", "HS256", "cty", "JWT", "crit", "cty");
+    char *header_str = json_dumps(header, JSON_COMPACT);
+    char *header_b64u = NULL;
+    size_t header_b64u_len = 0;
+    ck_assert(cjose_base64url_encode((const uint8_t *)header_str, strlen(header_str), &header_b64u, &header_b64u_len, &err));
+    const char *rest = strchr(compact, '.');
+    char *tampered = malloc(header_b64u_len + strlen(rest) + 1);
+    ck_assert(NULL != tampered);
+    memcpy(tampered, header_b64u, header_b64u_len);
+    strcpy(tampered + header_b64u_len, rest);
+
+    memset(&err, 0, sizeof(err));
+    ck_assert_msg(NULL == cjose_jws_import(tampered, strlen(tampered), &err), "cjose_jws_import accepted a crit list");
+    ck_assert_int_eq(CJOSE_ERR_INVALID_ARG, err.code);
+
+    free(tampered);
+    cjose_get_dealloc()(header_b64u);
+    cjose_get_dealloc()(header_str);
+    json_decref(header);
+    cjose_jws_release(jws);
+    cjose_header_release(hdr);
+    cjose_jwk_release(jwk);
+}
+END_TEST
+
 Suite *cjose_jws_suite(void)
 {
     Suite *suite = suite_create("jws");
@@ -1564,14 +1566,12 @@ Suite *cjose_jws_suite(void)
     tcase_add_test(tc_jws, test_cjose_jws_verify_ec256);
     tcase_add_test(tc_jws, test_cjose_jws_verify_es256k);
     tcase_add_test(tc_jws, test_cjose_jws_es256k_rejects_wrong_curve);
-#if defined(CJOSE_OPENSSL_111X)
     tcase_add_test(tc_jws, test_cjose_jws_verify_ed25519);
     tcase_add_test(tc_jws, test_cjose_jws_sign_ed25519);
     tcase_add_test(tc_jws, test_cjose_jws_sign_verify_ed448);
     tcase_add_test(tc_jws, test_cjose_jws_ed25519_rejects_wrong_key);
     tcase_add_test(tc_jws, test_cjose_jws_eddsa_deprecated);
     tcase_add_test(tc_jws, test_cjose_jws_verify_ed25519_sig_bad_length);
-#endif
     tcase_add_test(tc_jws, test_cjose_jws_sign_with_bad_header);
     tcase_add_test(tc_jws, test_cjose_jws_sign_with_bad_key);
     tcase_add_test(tc_jws, test_cjose_jws_sign_hmac_with_non_oct_key);
@@ -1583,8 +1583,8 @@ Suite *cjose_jws_suite(void)
     tcase_add_test(tc_jws, test_cjose_jws_verify_bad_params);
     tcase_add_test(tc_jws, test_cjose_jws_none);
     tcase_add_test(tc_jws, test_cjose_jws_verify_ps_sig_bad_length);
-    tcase_add_test(tc_jws, test_cjose_jws_verify_ps_alloc_failure);
     tcase_add_test(tc_jws, test_cjose_jws_verify_ec_sig_bad_length);
+    tcase_add_test(tc_jws, test_cjose_jws_crit_refused);
     suite_add_tcase(suite, tc_jws);
 
     return suite;

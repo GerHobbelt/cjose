@@ -1,3 +1,5 @@
-usr/lib/libcjose.la
-usr/lib/libcjose.a
-usr/lib/pkgconfig/cjose.pc
+usr/include/cjose/*.h
+usr/lib/*/libcjose.so
+usr/lib/*/libcjose.a
+usr/lib/*/pkgconfig/cjose.pc
+usr/lib/*/cmake/cjose/*

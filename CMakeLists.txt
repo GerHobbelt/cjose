@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.22)
 
 project(cjose
-    VERSION 0.7.0
+    VERSION 1.0.0
     DESCRIPTION "JOSE implementation for C"
     HOMEPAGE_URL "https://github.com/cisco/cjose"
     LANGUAGES C)
@@ -48,20 +48,12 @@ endif()
 # ---------------------------------------------------------------------------
 # Dependencies
 # ---------------------------------------------------------------------------
-find_package(OpenSSL 1.0.1 REQUIRED)
+find_package(OpenSSL 3.0.0 REQUIRED)
 find_package(Jansson 2.3 REQUIRED)
 
 if(WIN32)
     set(CJOSE_PLATFORM_LIBRARIES ws2_32)
 endif()
-
-# Optional Cisco "Fundamental EC" OpenSSL extension (openssl/fec.h).
-include(CheckIncludeFile)
-include(CMakePushCheckState)
-cmake_push_check_state(RESET)
-set(CMAKE_REQUIRED_LIBRARIES OpenSSL::Crypto)
-check_include_file("openssl/fec.h" CJOSE_HAVE_OPENSSL_FEC_H)
-cmake_pop_check_state()
 
 # ---------------------------------------------------------------------------
 # Generated public header (version.h)
@@ -114,16 +106,16 @@ set(CJOSE_EXPORTS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/cmake/exports")
 add_library(cjose_objects OBJECT ${CJOSE_SOURCES} ${CJOSE_INTERNAL_HEADERS})
 set_target_properties(cjose_objects PROPERTIES
     POSITION_INDEPENDENT_CODE ON
-    C_STANDARD 99
+    C_STANDARD 17
     C_STANDARD_REQUIRED ON
-    C_EXTENSIONS ON)
+    C_EXTENSIONS OFF)
 
-target_compile_definitions(cjose_objects PRIVATE OPENSSL_API_COMPAT=0x10100000L)
+# cjose uses the OpenSSL 3 APIs only. Hiding every API that OpenSSL has
+# deprecated turns a reintroduced legacy call into a compile error on every
+# platform, instead of a warning that only -Werror builds reject.
+target_compile_definitions(cjose_objects PRIVATE OPENSSL_NO_DEPRECATED)
 if(CJOSE_ENABLE_RSA1_5)
     target_compile_definitions(cjose_objects PRIVATE HAVE_RSA_PKCS1_PADDING=1)
-endif()
-if(CJOSE_HAVE_OPENSSL_FEC_H)
-    target_compile_definitions(cjose_objects PRIVATE HAVE_OPENSSL_FEC_H=1)
 endif()
 if(MSVC)
     target_compile_options(cjose_objects PRIVATE /W3 /WX /wd4267)
@@ -336,7 +328,7 @@ if(CJOSE_BUILD_TESTS)
     if(NOT _cjose_check_target)
         find_package(PkgConfig QUIET)
         if(PkgConfig_FOUND)
-            pkg_check_modules(CHECK QUIET check>=0.9.4 IMPORTED_TARGET)
+            pkg_check_modules(CHECK QUIET check>=0.12.0 IMPORTED_TARGET)
             if(TARGET PkgConfig::CHECK)
                 set(_cjose_check_target PkgConfig::CHECK)
             endif()
@@ -360,7 +352,7 @@ if(CJOSE_BUILD_TESTS)
     endif()
 
     if(NOT _cjose_check_target)
-        message(WARNING "Check (>= 0.9.4) not found; skipping cjose unit tests.")
+        message(WARNING "Check (>= 0.12.0) not found; skipping cjose unit tests.")
     else()
         set(CJOSE_TEST_SOURCES
             test/check_cjose.c
@@ -389,10 +381,10 @@ if(CJOSE_BUILD_TESTS)
             ${CJOSE_PLATFORM_LIBRARIES})
 
         set_target_properties(check_cjose PROPERTIES
-            C_STANDARD 99
+            C_STANDARD 17
             C_STANDARD_REQUIRED ON
-            C_EXTENSIONS ON)
-        target_compile_definitions(check_cjose PRIVATE OPENSSL_API_COMPAT=0x10100000L)
+            C_EXTENSIONS OFF)
+        target_compile_definitions(check_cjose PRIVATE OPENSSL_NO_DEPRECATED)
         if(CJOSE_ENABLE_RSA1_5)
             target_compile_definitions(check_cjose PRIVATE HAVE_RSA_PKCS1_PADDING=1)
         endif()
