@@ -46,6 +46,16 @@ extern "C" {
 #define CJOSE_HDR_IV "iv"
 #define CJOSE_HDR_TAG "tag"
 
+/**
+ * For the PBES2 algorithms, the PBKDF2 salt input and iteration count (RFC 7518 section 4.8.1).
+ * The salt input is always generated when encrypting and a caller-supplied "p2s" is refused,
+ * because RFC 7518 section 4.8.1.1 requires a new one to be generated randomly for every
+ * encryption operation. The iteration count may be supplied, per recipient where a JWE has
+ * several, and is defaulted when absent.
+ */
+#define CJOSE_HDR_P2S "p2s"
+#define CJOSE_HDR_P2C "p2c"
+
 /** The JWA algorithm attribute value for none. */
 #define CJOSE_HDR_ALG_NONE "none"
 
@@ -70,6 +80,11 @@ extern "C" {
 #define CJOSE_HDR_ALG_A128GCMKW "A128GCMKW"
 #define CJOSE_HDR_ALG_A192GCMKW "A192GCMKW"
 #define CJOSE_HDR_ALG_A256GCMKW "A256GCMKW"
+
+/** The JWE algorithm attribute values for PBES2-HS256+A128KW, PBES2-HS384+A192KW and PBES2-HS512+A256KW (RFC 7518 section 4.8). */
+#define CJOSE_HDR_ALG_PBES2_HS256_A128KW "PBES2-HS256+A128KW"
+#define CJOSE_HDR_ALG_PBES2_HS384_A192KW "PBES2-HS384+A192KW"
+#define CJOSE_HDR_ALG_PBES2_HS512_A256KW "PBES2-HS512+A256KW"
 
 /** The JWE algorithm attribute value for ECDH-ES with A128KW, A192KW or A256KW key wrapping. */
 #define CJOSE_HDR_ALG_ECDH_ES_A128KW "ECDH-ES+A128KW"
@@ -96,6 +111,11 @@ extern "C" {
 #define CJOSE_HDR_ALG_ES256K "ES256K"
 #define CJOSE_HDR_ALG_ES384 "ES384"
 #define CJOSE_HDR_ALG_ES512 "ES512"
+
+/** The JWS algorithm attribute values for the ML-DSA signature algorithms of RFC 9964, US NIST FIPS 204. */
+#define CJOSE_HDR_ALG_ML_DSA_44 "ML-DSA-44"
+#define CJOSE_HDR_ALG_ML_DSA_65 "ML-DSA-65"
+#define CJOSE_HDR_ALG_ML_DSA_87 "ML-DSA-87"
 
 /** The JWS algorithm attribute values for the fully-specified EdDSA algorithms Ed25519 and Ed448 (RFC 9864). */
 #define CJOSE_HDR_ALG_ED25519 "Ed25519"

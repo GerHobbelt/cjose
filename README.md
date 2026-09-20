@@ -18,9 +18,14 @@ JWS signing algorithms (`alg`):
 | `ES256`, `ES384`, `ES512` | ECDSA with P-256, P-384 and P-521 | |
 | `ES256K` | ECDSA with secp256k1 | OpenSSL built with `secp256k1` |
 | `Ed25519`, `Ed448` | EdDSA (RFC 9864) | |
+| `ML-DSA-44`, `ML-DSA-65`, `ML-DSA-87` | ML-DSA (RFC 9964, US NIST FIPS 204) | build option `CJOSE_ENABLE_ML_DSA`, OpenSSL >= 3.5 |
 
 The polymorphic `EdDSA` identifier of RFC 8037, deprecated by RFC 9864, and
 `none` are not accepted.
+
+The ML-DSA algorithms sign with the `AKP` key type of RFC 9964. They are pure
+ML-DSA over the JWS signing input, with the empty context string RFC 9964
+requires; HashML-DSA is not part of that specification and is not offered.
 
 JWE key management algorithms (`alg`):
 
@@ -31,9 +36,23 @@ JWE key management algorithms (`alg`):
 | `RSA1_5` | RSAES-PKCS1-v1_5 | build option `CJOSE_ENABLE_RSA1_5` |
 | `A128KW`, `A192KW`, `A256KW` | AES Key Wrap | |
 | `A128GCMKW`, `A192GCMKW`, `A256GCMKW` | AES GCM key wrapping | |
+| `PBES2-HS256+A128KW`, `PBES2-HS384+A192KW`, `PBES2-HS512+A256KW` | PBKDF2 with HMAC SHA-2 and AES Key Wrap | |
 | `dir` | direct use of a shared symmetric key | |
 | `ECDH-ES` | ECDH-ES direct key agreement, with an EC key or an OKP `X25519` or `X448` key | |
 | `ECDH-ES+A128KW`, `ECDH-ES+A192KW`, `ECDH-ES+A256KW` | ECDH-ES with AES Key Wrap, with an EC key or an OKP `X25519` or `X448` key | |
+
+The PBES2 salt input (`p2s`) is generated for every encryption, as RFC 7518
+section 4.8.1.1 requires, and a caller-supplied one is refused. The iteration
+count (`p2c`) can be set in the header, per recipient where a JWE has several,
+and defaults to 8192. Beyond the 8 octet salt input the RFC requires, cjose
+applies limits of its own: it writes no fewer than 1000 iterations, the
+RFC's recommendation, it neither writes nor accepts more than 1000000, and it
+accepts no salt input longer than 1024 octets. What it accepts when decrypting is
+otherwise what RFC 7518 section 4.8.1.2 allows, any positive count, so that a
+conformant producer's JWE is readable whatever count it chose; the ceiling is
+what bounds the key derivation an unauthenticated JWE can demand, per
+recipient. These are policy rather than RFC validation, and each is a build
+option (see [Build Options](#build-options)).
 
 JWE content encryption algorithms (`enc`):
 
@@ -50,6 +69,7 @@ JWK key types (`kty`):
 | `EC` | `P-256`, `P-384`, `P-521`, `secp256k1` | `secp256k1`: OpenSSL built with it |
 | `oct` | symmetric | |
 | `OKP` | `Ed25519`, `Ed448`, `X25519`, `X448` | |
+| `AKP` | `ML-DSA-44`, `ML-DSA-65`, `ML-DSA-87` (RFC 9964) | build option `CJOSE_ENABLE_ML_DSA`, OpenSSL >= 3.5 |
 
 JWEs can be produced and consumed in both the compact and the JSON
 serialization, with one or more recipients.
@@ -68,7 +88,7 @@ serialization, with one or more recipients.
 
 ### Libraries ###
 
-* OpenSSL >= 3.0.0
+* OpenSSL >= 3.0.0 (>= 3.5 for the ML-DSA signature algorithms, see the `CJOSE_ENABLE_ML_DSA` build option below)
 * Jansson >= 2.3
 
 ## Getting Started ##
@@ -93,8 +113,19 @@ Pass options with `-D<OPTION>=<VALUE>` at configure time:
 | `CJOSE_BUILD_STATIC` | `ON` | Build the static library |
 | `CJOSE_BUILD_TESTS` | `ON` when top-level | Build the unit tests (requires Check) |
 | `CJOSE_ENABLE_RSA1_5` | `OFF` | Enable the RSA1_5 (RSAES-PKCS1-v1_5) key encryption algorithm |
+| `CJOSE_ENABLE_ML_DSA` | `OFF` | Enable the ML-DSA signature algorithms and the `AKP` key type (RFC 9964); requires OpenSSL >= 3.5 |
 | `CJOSE_MSVC_STATIC_RUNTIME` | `OFF` | (MSVC) Link against the static C runtime (`/MT`) |
 | `CJOSE_MACOS_DYLIB` | `OFF` | (macOS) Build a plain `.dylib` instead of a framework |
+| `CJOSE_JWE_PBES2_MIN_ITERATIONS` | `1000` | Lowest PBES2 iteration count cjose will produce |
+| `CJOSE_JWE_PBES2_MIN_ACCEPTED_ITERATIONS` | `1` | Lowest PBES2 iteration count cjose will accept when decrypting |
+| `CJOSE_JWE_PBES2_MAX_ITERATIONS` | `1000000` | Highest PBES2 iteration count cjose will produce or accept; keep at or above `100000`, the highest default a mainstream producer ships |
+| `CJOSE_JWE_PBES2_DEFAULT_ITERATIONS` | `8192` | PBES2 iteration count used when the caller sets no `p2c` |
+| `CJOSE_JWE_PBES2_MAX_SALT_LEN` | `1024` | Largest PBES2 salt input cjose will accept, in octets |
+
+The PBES2 iteration counts must keep the order
+`MIN_ACCEPTED_ITERATIONS` &le; `MIN_ITERATIONS` &le; `DEFAULT_ITERATIONS` &le;
+`MAX_ITERATIONS`, so setting one may mean setting another; a combination that
+does not is refused when the library is compiled.
 
 For example, to build only the static library in debug mode:
 
