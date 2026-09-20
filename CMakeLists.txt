@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.22)
 
 project(cjose
-    VERSION 0.6.1
+    VERSION 0.6.3
     DESCRIPTION "JOSE implementation for C"
     HOMEPAGE_URL "https://github.com/cisco/cjose"
     LANGUAGES C)
@@ -80,6 +80,7 @@ set(CJOSE_SOURCES
     src/jwe.c
     src/jws.c
     src/header.c
+    src/header_compat.c
     src/error.c)
 
 set(CJOSE_INTERNAL_HEADERS
