@@ -455,11 +455,11 @@ static bool _cjose_jwe_set_cek_aes_cbc(cjose_jwe_t *jwe, const cjose_jwk_t *jwk,
     if (strcmp(enc, CJOSE_HDR_ENC_A256CBC_HS512) == 0)
         keysize = 64;
 
+    // if no JWK is provided, generate a random key
     if (NULL == jwk)
     {
-        // allocate memory for the CEK and fill with random bytes or 0's
         _cjose_release_cek(&jwe->cek, jwe->cek_len);
-        if (!_cjose_jwe_malloc(keysize, !random, &jwe->cek, err))
+        if (!_cjose_jwe_malloc(keysize, random, &jwe->cek, err))
         {
             return false;
         }
@@ -591,6 +591,15 @@ _cjose_jwe_decrypt_ek_aes_kw(_jwe_int_recipient_t *recipient, cjose_jwe_t *jwe, 
         return false;
     }
 
+    // the wrapped key (RFC 3394) is always the plaintext CEK length plus 8 bytes;
+    // enforce this before calling AES_unwrap_key, which would otherwise copy the
+    // attacker-controlled encrypted_key into the fixed-size jwe->cek buffer
+    if (recipient->enc_key.raw_len != jwe->cek_len + 8)
+    {
+        CJOSE_ERROR(err, CJOSE_ERR_INVALID_ARG);
+        return false;
+    }
+
     // AES unwrap the CEK in to jwe->cek
     int len = AES_unwrap_key(&akey, (const unsigned char *)NULL, jwe->cek, (const unsigned char *)recipient->enc_key.raw,
                              recipient->enc_key.raw_len);
@@ -684,12 +693,17 @@ static bool _cjose_jwe_decrypt_ek_rsa_padding(
     }
 
     // decrypt the CEK using RSA v1.5 or OAEP padding
-    jwe->cek_len = RSA_private_decrypt(recipient->enc_key.raw_len, recipient->enc_key.raw, jwe->cek, (RSA *)jwk->keydata, padding);
-    if (-1 == jwe->cek_len)
+    int dlen = RSA_private_decrypt(recipient->enc_key.raw_len, recipient->enc_key.raw, jwe->cek, (RSA *)jwk->keydata, padding);
+    if (-1 == dlen)
     {
+        _cjose_release_cek(&jwe->cek, buflen);
+        jwe->cek_len = 0;
+        
         CJOSE_ERROR(err, CJOSE_ERR_CRYPTO);
         return false;
     }
+
+    jwe->cek_len = (size_t)dlen;
 
     return true;
 }
@@ -1263,6 +1277,12 @@ static bool _cjose_jwe_decrypt_dat_a256gcm(cjose_jwe_t *jwe, cjose_err *err)
 
     // initialize context for decryption using A256GCM cipher and CEK and IV
     if (EVP_DecryptInit_ex(ctx, cipher, NULL, jwe->cek, jwe->enc_iv.raw) != 1)
+    {
+        CJOSE_ERROR(err, CJOSE_ERR_CRYPTO);
+        goto _cjose_jwe_decrypt_dat_a256gcm_fail;
+    }
+
+    if (jwe->enc_auth_tag.raw_len != 16)
     {
         CJOSE_ERROR(err, CJOSE_ERR_CRYPTO);
         goto _cjose_jwe_decrypt_dat_a256gcm_fail;

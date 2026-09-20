@@ -809,6 +809,141 @@ START_TEST(test_cjose_jwe_decrypt_aes)
 }
 END_TEST
 
+START_TEST(test_cjose_jwe_decrypt_aes_gcm)
+{
+    cjose_err err;
+
+    const char *key = JWK_OCT_32;
+    const char *plain1 = "Live long and prosper.";
+    char *compact1 = "eyJhbGciOiAiZGlyIiwgImVuYyI6ICJBMjU2R0NNIn0..Du_9fxxV-zrReaWC.aS_rpokeuxkaPc2sykcQDCQuJCYoww.GpeKGEqd8KQ0v6JNea5aSA";
+    char *compact2 = "eyJhbGciOiAiZGlyIiwgImVuYyI6ICJBMjU2R0NNIn0..Du_9fxxV-zrReaWC.aS_rpokeuxkaPc2sykcQDCQuJCYoww.Gp";
+
+    cjose_jwk_t *jwk = cjose_jwk_import(key, strlen(key), &err);
+    ck_assert_msg(NULL != jwk,
+                  "cjose_jwk_import failed: "
+                  "%s, file: %s, function: %s, line: %ld",
+                  err.message, err.file, err.function, err.line);
+
+    cjose_jwe_t *jwe1 = cjose_jwe_import(compact1, strlen(compact1), &err);
+    ck_assert_msg(NULL != jwe1,
+                  "cjose_jwe_import failed: "
+                  "%s, file: %s, function: %s, line: %ld",
+                  err.message, err.file, err.function, err.line);
+
+    uint8_t *plain2 = NULL;
+    size_t plain2_len = 0;
+    plain2 = cjose_jwe_decrypt(jwe1, jwk, &plain2_len, &err);
+    ck_assert_msg(NULL != plain2,
+                  "cjose_jwe_decrypt failed: "
+                  "%s, file: %s, function: %s, line: %ld",
+                  err.message, err.file, err.function, err.line);
+
+    ck_assert_msg(plain2_len == strlen(plain1),
+                  "length of decrypted plaintext does not match length of original, "
+                  "expected: %lu, found: %lu",
+                  strlen(plain1), plain2_len);
+    ck_assert_msg(strncmp(plain1, plain2, plain2_len) == 0, "decrypted plaintext does not match encrypted plaintext");
+
+    cjose_get_dealloc()(plain2);
+    cjose_jwe_release(jwe1);
+
+    cjose_jwe_t *jwe2 = cjose_jwe_import(compact2, strlen(compact2), &err);
+    ck_assert_msg(NULL != jwe2,
+                   "cjose_jwe_import failed: "
+                   "%s, file: %s, function: %s, line: %ld",
+                   err.message, err.file, err.function, err.line);
+
+    uint8_t *plain3 = NULL;
+    size_t plain3_len = 0;
+    plain3 = cjose_jwe_decrypt(jwe2, jwk, &plain3_len, &err);
+    ck_assert_msg(NULL == plain3,
+                   "cjose_jwe_decrypt succeeded where it should have failed: "
+                   "%s, file: %s, function: %s, line: %ld",
+                   err.message, err.file, err.function, err.line);
+
+    cjose_jwe_release(jwe2);
+    cjose_jwk_release(jwk);
+}
+END_TEST
+
+// build a compact JWE from a valid AES-KW JWE but with the encrypted_key segment
+// replaced by an oversized (attacker-controlled) base64url blob, then confirm that
+// importing parses fine but decryption fails gracefully instead of overflowing the
+// fixed-size CEK buffer in AES_unwrap_key (RFC 3394 wrapped key is always cek_len + 8)
+static void _decrypt_oversized_aes_kw_ek(const char *alg, const char *enc, const char *key)
+{
+    cjose_err err;
+
+    cjose_jwk_t *jwk = cjose_jwk_import(key, strlen(key), &err);
+    ck_assert_msg(NULL != jwk, "cjose_jwk_import failed: %s", err.message);
+
+    cjose_header_t *hdr = cjose_header_new(&err);
+    ck_assert(cjose_header_set(hdr, CJOSE_HDR_ALG, alg, &err));
+    ck_assert(cjose_header_set(hdr, CJOSE_HDR_ENC, enc, &err));
+
+    const char *plain = "Setec Astronomy";
+    cjose_jwe_t *jwe = cjose_jwe_encrypt(jwk, hdr, (const uint8_t *)plain, strlen(plain), &err);
+    ck_assert_msg(NULL != jwe, "cjose_jwe_encrypt failed: %s", err.message);
+
+    char *compact = cjose_jwe_export(jwe, &err);
+    ck_assert_msg(NULL != compact, "cjose_jwe_export failed: %s", err.message);
+
+    // locate the boundaries of the encrypted_key (second) segment
+    char *first_dot = strchr(compact, '.');
+    ck_assert(NULL != first_dot);
+    char *second_dot = strchr(first_dot + 1, '.');
+    ck_assert(NULL != second_dot);
+
+    // craft an oversized encrypted_key: 1024 raw bytes base64url-encoded; this decodes
+    // to far more than any CEK length (16/24/32 ... 64) + 8 bytes
+    uint8_t oversized[1024];
+    memset(oversized, 0x41, sizeof(oversized));
+    char *oversized_b64u = NULL;
+    size_t oversized_b64u_len = 0;
+    ck_assert(cjose_base64url_encode(oversized, sizeof(oversized), &oversized_b64u, &oversized_b64u_len, &err));
+
+    // reassemble: <header>.<oversized_ek>.<iv>.<ciphertext>.<tag>
+    size_t header_len = first_dot - compact;
+    const char *tail = second_dot; // includes the leading '.'
+    size_t tail_len = strlen(tail);
+    size_t tampered_len = header_len + 1 + oversized_b64u_len + tail_len;
+    char *tampered = (char *)malloc(tampered_len + 1);
+    ck_assert(NULL != tampered);
+    memcpy(tampered, compact, header_len);
+    tampered[header_len] = '.';
+    memcpy(tampered + header_len + 1, oversized_b64u, oversized_b64u_len);
+    memcpy(tampered + header_len + 1 + oversized_b64u_len, tail, tail_len);
+    tampered[tampered_len] = '\0';
+
+    // import must still succeed (parsing the oversized segment is legal)
+    cjose_jwe_t *jwe_bad = cjose_jwe_import(tampered, tampered_len, &err);
+    ck_assert_msg(NULL != jwe_bad, "cjose_jwe_import of oversized encrypted_key failed for alg %s: %s", alg, err.message);
+
+    // decryption must fail cleanly (no heap overflow) with CJOSE_ERR_INVALID_ARG
+    size_t plain_len = 0;
+    uint8_t *decrypted = cjose_jwe_decrypt(jwe_bad, jwk, &plain_len, &err);
+    ck_assert_msg(NULL == decrypted, "cjose_jwe_decrypt succeeded on oversized encrypted_key for alg %s", alg);
+    ck_assert_msg(CJOSE_ERR_INVALID_ARG == err.code, "cjose_jwe_decrypt returned wrong err.code %d for alg %s", err.code, alg);
+
+    free(tampered);
+    cjose_get_dealloc()(oversized_b64u);
+    cjose_get_dealloc()(compact);
+    cjose_jwe_release(jwe_bad);
+    cjose_jwe_release(jwe);
+    cjose_header_release(hdr);
+    cjose_jwk_release(jwk);
+}
+
+START_TEST(test_cjose_jwe_decrypt_aes_kw_oversized_ek)
+{
+    _decrypt_oversized_aes_kw_ek(CJOSE_HDR_ALG_A128KW, CJOSE_HDR_ENC_A128CBC_HS256, JWK_OCT_16);
+    _decrypt_oversized_aes_kw_ek(CJOSE_HDR_ALG_A192KW, CJOSE_HDR_ENC_A192CBC_HS384, JWK_OCT_24);
+    _decrypt_oversized_aes_kw_ek(CJOSE_HDR_ALG_A256KW, CJOSE_HDR_ENC_A256CBC_HS512, JWK_OCT_32);
+    _decrypt_oversized_aes_kw_ek(CJOSE_HDR_ALG_A128KW, CJOSE_HDR_ENC_A256GCM, JWK_OCT_16);
+    _decrypt_oversized_aes_kw_ek(CJOSE_HDR_ALG_A256KW, CJOSE_HDR_ENC_A256GCM, JWK_OCT_32);
+}
+END_TEST
+
 START_TEST(test_cjose_jwe_decrypt_rsa)
 {
     struct cjose_jwe_decrypt_rsa
@@ -1197,6 +1332,63 @@ START_TEST(test_cjose_jwe_multiple_recipients)
 }
 END_TEST
 
+// regression test for the AES-CBC-HMAC content-encryption key (CEK): it must
+// be generated from fresh random bytes on every encryption. A previous bug
+// zero-filled it (inverted random flag); because AES key wrap is deterministic,
+// that produced a byte-identical encrypted_key on every encryption with the
+// same KEK. Encrypt the same plaintext twice and assert the encrypted_key (the
+// 2nd compact field) differs.
+static void _assert_cbc_cek_random(const char *alg, const char *enc, const char *jwk_str)
+{
+    cjose_err err;
+
+    cjose_jwk_t *jwk = cjose_jwk_import(jwk_str, strlen(jwk_str), &err);
+    ck_assert_msg(NULL != jwk, "cjose_jwk_import failed: %s", err.message);
+
+    cjose_header_t *hdr = cjose_header_new(&err);
+    ck_assert_msg(NULL != hdr, "cjose_header_new failed: %s", err.message);
+    ck_assert(cjose_header_set(hdr, CJOSE_HDR_ALG, alg, &err));
+    ck_assert(cjose_header_set(hdr, CJOSE_HDR_ENC, enc, &err));
+
+    const char *plain = "Setec Astronomy";
+    char ek[2][512];
+
+    for (int i = 0; i < 2; i++)
+    {
+        cjose_jwe_t *jwe = cjose_jwe_encrypt(jwk, hdr, (const uint8_t *)plain, strlen(plain), &err);
+        ck_assert_msg(NULL != jwe, "cjose_jwe_encrypt failed (%s/%s): %s", alg, enc, err.message);
+
+        char *cser = cjose_jwe_export(jwe, &err);
+        ck_assert_msg(NULL != cser, "cjose_jwe_export failed: %s", err.message);
+
+        // the encrypted_key is the 2nd of the 5 dot-separated compact parts
+        const char *d1 = strchr(cser, '.');
+        const char *d2 = (NULL != d1) ? strchr(d1 + 1, '.') : NULL;
+        ck_assert_msg(NULL != d1 && NULL != d2, "malformed compact serialization");
+        size_t n = (size_t)(d2 - (d1 + 1));
+        ck_assert_msg(n > 0 && n < sizeof(ek[i]), "unexpected encrypted_key length");
+        memcpy(ek[i], d1 + 1, n);
+        ek[i][n] = '\0';
+
+        cjose_get_dealloc()(cser);
+        cjose_jwe_release(jwe);
+    }
+
+    ck_assert_msg(0 != strcmp(ek[0], ek[1]),
+                  "AES-CBC-HMAC CEK is not random: identical encrypted_key across two encryptions (%s/%s)", alg, enc);
+
+    cjose_header_release(hdr);
+    cjose_jwk_release(jwk);
+}
+
+START_TEST(test_cjose_jwe_encrypt_cbc_cek_random)
+{
+    _assert_cbc_cek_random(CJOSE_HDR_ALG_A128KW, CJOSE_HDR_ENC_A128CBC_HS256, JWK_OCT_16);
+    _assert_cbc_cek_random(CJOSE_HDR_ALG_A192KW, CJOSE_HDR_ENC_A192CBC_HS384, JWK_OCT_24);
+    _assert_cbc_cek_random(CJOSE_HDR_ALG_A256KW, CJOSE_HDR_ENC_A256CBC_HS512, JWK_OCT_32);
+}
+END_TEST
+
 Suite *cjose_jwe_suite()
 {
     Suite *suite = suite_create("jwe");
@@ -1210,6 +1402,8 @@ Suite *cjose_jwe_suite()
     tcase_add_test(tc_jwe, test_cjose_jwe_self_encrypt_self_decrypt_large);
     tcase_add_test(tc_jwe, test_cjose_jwe_self_encrypt_self_decrypt_many);
     tcase_add_test(tc_jwe, test_cjose_jwe_decrypt_aes);
+    tcase_add_test(tc_jwe, test_cjose_jwe_decrypt_aes_gcm);
+    tcase_add_test(tc_jwe, test_cjose_jwe_decrypt_aes_kw_oversized_ek);
     tcase_add_test(tc_jwe, test_cjose_jwe_decrypt_rsa);
     tcase_add_test(tc_jwe, test_cjose_jwe_encrypt_with_bad_header);
     tcase_add_test(tc_jwe, test_cjose_jwe_encrypt_with_bad_key);
@@ -1218,6 +1412,7 @@ Suite *cjose_jwe_suite()
     tcase_add_test(tc_jwe, test_cjose_jwe_import_invalid_serialization);
     tcase_add_test(tc_jwe, test_cjose_jwe_decrypt_bad_params);
     tcase_add_test(tc_jwe, test_cjose_jwe_multiple_recipients);
+    tcase_add_test(tc_jwe, test_cjose_jwe_encrypt_cbc_cek_random);
     suite_add_tcase(suite, tc_jwe);
 
     return suite;
